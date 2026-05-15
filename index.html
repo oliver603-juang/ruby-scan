@@ -2548,12 +2548,19 @@ function runPipeline() {
     log(`  ⚠️ ${s.face}[${s.pos}] amb=${s.ambiguity.toFixed(3)} ${s.color}↔${s.secondColor}`,'warn');
   });
 
-  // Stage 6: Edge constraints
+  // Stage 6: Edge constraints (skip if counts already balanced)
   log('── Stage 6: 邊塊約束修正 ──');
   faceColors={};
   ['F','R','B','L','U','D'].forEach(f=>{
     faceColors[f]=allStickers.filter(s=>s.face===f).sort((a,b)=>a.pos-b.pos).map(s=>s.color);
   });
+  const preFixCnt={W:0,R:0,B:0,O:0,G:0,Y:0};
+  allStickers.forEach(s=>{if(s.color)preFixCnt[s.color]=(preFixCnt[s.color]||0)+1;});
+  const alreadyBalanced=Object.values(preFixCnt).every(v=>v===9);
+  if(alreadyBalanced){
+    log('  ✅ 數量已平衡 (9×6)，跳過 Stage 6-7 避免過度修正');
+  } else {
+    log('  數量不平衡: '+JSON.stringify(preFixCnt)+'，執行修正');
   const edgeConstraints = [
     ['F',1,'R',3],['F',3,'L',5],['F',5,'R',3],['R',5,'B',3],['B',5,'L',3],['L',5,'F',3],
     ['F',2,'R',0],['R',2,'B',0],['B',2,'L',0],['L',2,'F',0],
@@ -2629,6 +2636,12 @@ function runPipeline() {
     }
   }
   log(`  邊塊修正: ${fixes7}`);
+  } // end of !alreadyBalanced else block
+
+  // Rebuild faceColors after any fixes
+  ['F','R','B','L','U','D'].forEach(f=>{
+    faceColors[f]=allStickers.filter(s=>s.face===f).sort((a,b)=>a.pos-b.pos).map(s=>s.color);
+  });
 
   // Stage 8: Count check
   log('── Stage 8: 數量檢查 ──');
