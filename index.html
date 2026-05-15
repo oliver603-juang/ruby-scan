@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>魔方色塊掃描器</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+TC:wght@400;600;700&display=swap');
+
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0e0e12;--surface:#18181f;--surface2:#22222c;--border:#2a2a38;
+  --text:#e4e4ef;--text2:#8888a0;--accent:#5cf;--accent2:#f85;
+  --red:#e33;--green:#3b5;--blue:#48f;--orange:#f83;--yellow:#fd2;--white:#eee;
+  --font-mono:'JetBrains Mono',monospace;--font-ui:'Noto Sans TC',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:14px;line-height:1.5}
+h1{font-size:1.4em;font-weight:700;color:var(--accent);margin-bottom:4px}
+h2{font-size:1.1em;font-weight:600;color:var(--text);margin:16px 0 8px;border-bottom:1px solid var(--border);padding-bottom:4px}
+h3{font-size:.95em;color:var(--text2);margin:8px 0 4px}
+
+.app{max-width:1200px;margin:0 auto;padding:12px}
+.top-bar{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.top-bar h1{margin:0}
+.badge{font-size:.75em;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:2px 8px;color:var(--text2);font-family:var(--font-mono)}
+
+/* Upload grid */
+.upload-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:12px}
+.upload-cell{position:relative;aspect-ratio:1;background:var(--surface);border:2px dashed var(--border);border-radius:8px;cursor:pointer;overflow:hidden;display:flex;align-items:center;justify-content:center;flex-direction:column;transition:border-color .2s}
+.upload-cell:hover{border-color:var(--accent)}
+.upload-cell.loaded{border-style:solid;border-color:var(--green)}
+.upload-cell img{width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0}
+.upload-cell .label{font-size:.7em;color:var(--text2);z-index:1;text-align:center;pointer-events:none}
+.upload-cell.loaded .label{background:rgba(0,0,0,.6);padding:1px 6px;border-radius:3px;color:#fff;position:absolute;bottom:4px;left:50%;transform:translateX(-50%)}
+.upload-cell input{display:none}
+
+/* Main layout */
+.main-row{display:grid;grid-template-columns:1fr 300px;gap:12px}
+@media(max-width:800px){.main-row{grid-template-columns:1fr}.tuning-panel{order:-1}}
+
+/* Result grid */
+.result-section{background:var(--surface);border-radius:8px;padding:12px;border:1px solid var(--border)}
+.cube-net{display:grid;gap:2px;justify-content:center;margin:8px 0}
+.face-block{display:grid;grid-template-columns:repeat(3,1fr);gap:2px}
+.face-block .cell{width:36px;height:36px;border-radius:4px;cursor:pointer;border:2px solid transparent;display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:.65em;color:rgba(0,0,0,.5);font-weight:700;transition:all .15s}
+.face-block .cell:hover{transform:scale(1.15);z-index:2}
+.face-block .cell.center{border-radius:50%}
+.face-block .cell.selected{border-color:#fff;box-shadow:0 0 8px rgba(255,255,255,.4)}
+.face-block .cell.low-conf{animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{box-shadow:none}50%{box-shadow:0 0 8px var(--accent2)}}
+
+.color-W{background:#f0f0f0}.color-R{background:#d42020}.color-B{background:#2060d0}
+.color-O{background:#f08020}.color-G{background:#20a050}.color-Y{background:#e8d020}
+
+/* Stats bar */
+.stats-bar{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.stat{font-family:var(--font-mono);font-size:.8em;padding:2px 8px;border-radius:4px;background:var(--surface2);border:1px solid var(--border)}
+.stat.ok{border-color:var(--green);color:var(--green)}
+.stat.bad{border-color:var(--red);color:var(--red)}
+
+/* Tuning panel */
+.tuning-panel{background:var(--surface);border-radius:8px;padding:12px;border:1px solid var(--border);height:fit-content;position:sticky;top:12px}
+.slider-group{margin-bottom:12px}
+.slider-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+.slider-row label{font-size:.75em;color:var(--text2);min-width:110px;flex-shrink:0}
+.slider-row input[type=range]{flex:1;accent-color:var(--accent);height:4px}
+.slider-row .val{font-family:var(--font-mono);font-size:.75em;color:var(--accent);min-width:40px;text-align:right}
+
+/* Diagnostic panel */
+.diag{background:var(--surface);border-radius:8px;padding:12px;border:1px solid var(--border);margin-top:12px}
+.diag-cell{background:var(--surface2);border-radius:6px;padding:8px;margin:4px 0;font-family:var(--font-mono);font-size:.72em;line-height:1.6;border:1px solid var(--border)}
+.diag-cell .row{display:flex;gap:8px;flex-wrap:wrap}
+.dist-entry{padding:1px 6px;border-radius:3px;background:var(--bg)}
+.dist-entry.best{background:var(--accent);color:#000;font-weight:700}
+.dist-entry.second{border:1px solid var(--accent2)}
+
+/* Buttons */
+.btn{font-family:var(--font-ui);font-size:.85em;padding:6px 16px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text);cursor:pointer;transition:all .15s}
+.btn:hover{background:var(--accent);color:#000;border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:#000;border-color:var(--accent);font-weight:600}
+.btn.primary:hover{background:#7df}
+
+/* Photo overlay canvas */
+.photo-preview{position:relative;display:inline-block;margin:4px}
+.photo-preview canvas{border-radius:6px;max-width:100%;display:block}
+
+/* Log */
+.log{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;font-family:var(--font-mono);font-size:.7em;max-height:200px;overflow-y:auto;margin:8px 0;color:var(--text2);white-space:pre-wrap}
+.log .warn{color:var(--accent2)}.log .err{color:var(--red)}.log .ok{color:var(--green)}
+
+/* Manual color picker */
+.color-picker-popup{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--surface);border:2px solid var(--accent);border-radius:12px;padding:16px;z-index:100;display:none}
+.color-picker-popup .colors{display:flex;gap:8px}
+.color-picker-popup .cpick{width:40px;height:40px;border-radius:8px;cursor:pointer;border:2px solid transparent}
+.color-picker-popup .cpick:hover{border-color:#fff;transform:scale(1.1)}
+.overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:99;display:none}
+
+/* Anchor display */
+.anchors-row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+.anchor-chip{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:4px;font-family:var(--font-mono);font-size:.72em;border:1px solid var(--border);background:var(--surface2)}
+.anchor-swatch{width:16px;height:16px;border-radius:3px;border:1px solid rgba(255,255,255,.2)}
+
+.photo-thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
+</style>
+</head>
+<body>
+<div class="app">
+
+<div class="top-bar">
+  <h1>🧊 魔方色塊掃描器</h1>
+  <span class="badge">11-Stage Pipeline</span>
+  <span class="badge" id="statusBadge">等待上傳</span>
+</div>
+
+<!-- Upload -->
+<div class="upload-grid" id="uploadGrid"></div>
+
+<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+  <button class="btn primary" onclick="runPipeline()" id="scanBtn" disabled>▶ 執行掃描</button>
+  <button class="btn" onclick="exportResult()">💾 匯出 JSON</button>
+  <button class="btn" onclick="toggleDiag()">📊 診斷面板</button>
+</div>
+
+<div class="main-row">
+<div>
+  <!-- Result -->
+  <div class="result-section" id="resultSection" style="display:none">
+    <h2>掃描結果</h2>
+    <div class="stats-bar" id="statsBar"></div>
+    <div id="cubeNetContainer"></div>
+    <h3>動態錨點</h3>
+    <div class="anchors-row" id="anchorsRow"></div>
+    <div class="log" id="logBox"></div>
+  </div>
+
+  <!-- Photo overlays -->
+  <div id="photoOverlays" style="display:none">
+    <h2>取樣位置預覽</h2>
+    <div class="photo-thumbs" id="photoThumbs"></div>
+  </div>
+
+  <!-- Diagnostics -->
+  <div class="diag" id="diagPanel" style="display:none">
+    <h2>格子診斷 <span style="font-size:.8em;color:var(--text2)">(點擊任何色塊展開)</span></h2>
+    <div id="diagContent"></div>
+  </div>
+</div>
+
+<!-- Tuning panel -->
+<div class="tuning-panel">
+  <h2 style="margin-top:0">⚙️ SCAN_CONFIG</h2>
+  <div id="slidersContainer"></div>
+  <button class="btn" onclick="exportConfig()" style="width:100%;margin-top:8px">📋 匯出參數 JSON</button>
+</div>
+</div>
+
+</div>
+
+<!-- Color picker popup -->
+<div class="overlay" id="overlay" onclick="closeColorPicker()"></div>
+<div class="color-picker-popup" id="colorPicker">
+  <h3 style="margin-bottom:8px" id="cpTitle">選擇顏色</h3>
+  <div class="colors" id="cpColors"></div>
+</div>
+
+<script>
+// ===== CONSTANTS =====
+const CMAP = {W:'#f0f0f0',R:'#d42020',B:'#2060d0',O:'#f08020',G:'#20a050',Y:'#e8d020'};
+const CC = {F:'R',R:'B',B:'O',L:'G',U:'W',D:'Y'};
+const C2F = {W:'U',B:'R',R:'F',Y:'D',G:'L',O:'B'};
+const CN = {W:'白',B:'藍',R:'紅',Y:'黃',G:'綠',O:'橘'};
+const SCAN_SEQ = [
+  {f:'F',name:'前(紅)',guide:'白色朝上，紅色面對鏡頭'},
+  {f:'R',name:'右(藍)',guide:'順時針轉90°，藍色面對鏡頭'},
+  {f:'B',name:'後(橘)',guide:'再轉90°，橘色面對鏡頭'},
+  {f:'L',name:'左(綠)',guide:'再轉90°，綠色面對鏡頭'},
+  {f:'U',name:'上(白)',guide:'往前傾，白色面對鏡頭'},
+  {f:'D',name:'下(黃)',guide:'往後傾180°，黃色面對鏡頭'},
+];
+const COLORS = ['W','R','B','O','G','Y'];
+const invalidPairs = [['R','O'],['W','Y'],['B','G']];
+const confusedPairs = [['R','O'],['B','G'],['W','Y']];
+
+// ===== SCAN_CONFIG (user-optimized) =====
+const SCAN_CONFIG = {
+  logoSatThreshold: 0.15,
+  lWeight: 0.4,
+  whiteSatThreshold: 0.15,
+  whiteSatPenalty: 200,
+  whiteBStarThreshold: 10,
+  whiteBStarPenalty: 8,
+  lowSatThreshold: 0.12,
+  lowSatPenalty: 40,
+  sampleRadius: 0.15,
+  trimRatio: 0.2
+};
+
+const SLIDER_DEFS = [
+  {key:'logoSatThreshold',label:'Logo飽和度門檻',min:0.05,max:0.35,step:0.01,group:'錨點防護'},
+  {key:'lWeight',label:'LAB亮度權重',min:0.1,max:1.0,step:0.05,group:'smartDist'},
+  {key:'whiteSatThreshold',label:'白色飽和度上限',min:0.05,max:0.35,step:0.01,group:'smartDist'},
+  {key:'whiteSatPenalty',label:'白色飽和度懲罰',min:50,max:400,step:10,group:'smartDist'},
+  {key:'whiteBStarThreshold',label:'白色b*軸上限',min:5,max:30,step:1,group:'smartDist'},
+  {key:'whiteBStarPenalty',label:'白色b*懲罰',min:1,max:20,step:0.5,group:'smartDist'},
+  {key:'lowSatThreshold',label:'低飽和度門檻',min:0.05,max:0.25,step:0.01,group:'smartDist'},
+  {key:'lowSatPenalty',label:'低飽和度懲罰',min:10,max:100,step:5,group:'smartDist'},
+  {key:'sampleRadius',label:'取樣半徑比例',min:0.05,max:0.30,step:0.01,group:'取樣'},
+  {key:'trimRatio',label:'TrimmedMean比例',min:0.05,max:0.40,step:0.05,group:'取樣'},
+];
+
+// ===== STATE =====
+let images = {};    // face -> Image
+let rawData = {};   // face -> [[r,g,b] x9]
+let anchors = {};   // color -> [r,g,b]
+let allStickers = [];
+let faceColors = {};
+let logLines = [];
+let diagShown = false;
+let selectedCell = null;
+
+// ===== INIT =====
+function init() {
+  buildUploadGrid();
+  buildSliders();
+}
+
+function buildUploadGrid() {
+  const grid = document.getElementById('uploadGrid');
+  SCAN_SEQ.forEach((s, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'upload-cell';
+    cell.id = 'uc_' + s.f;
+    cell.innerHTML = `<div class="label">${s.name}<br><small>${s.guide}</small></div><input type="file" accept="image/*" id="fi_${s.f}">`;
+    cell.onclick = () => document.getElementById('fi_'+s.f).click();
+    cell.querySelector('input').onchange = (e) => handleFile(e, s.f, i);
+    grid.appendChild(cell);
+  });
+}
+
+function handleFile(e, face, idx) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const img = new Image();
+  img.onload = () => {
+    images[face] = img;
+    const cell = document.getElementById('uc_'+face);
+    cell.classList.add('loaded');
+    let imgEl = cell.querySelector('img');
+    if (!imgEl) { imgEl = document.createElement('img'); cell.appendChild(imgEl); }
+    imgEl.src = img.src;
+    checkReady();
+  };
+  img.src = URL.createObjectURL(file);
+}
+
+function checkReady() {
+  const n = Object.keys(images).length;
+  document.getElementById('scanBtn').disabled = n < 6;
+  document.getElementById('statusBadge').textContent = n < 6 ? `已上傳 ${n}/6` : '✅ 就緒';
+}
+
+function buildSliders() {
+  const container = document.getElementById('slidersContainer');
+  let curGroup = '';
+  SLIDER_DEFS.forEach(sd => {
+    if (sd.group !== curGroup) {
+      curGroup = sd.group;
+      const h = document.createElement('h3');
+      h.textContent = '🔧 ' + curGroup;
+      container.appendChild(h);
+    }
+    const row = document.createElement('div');
+    row.className = 'slider-row';
+    const isInt = Number.isInteger(sd.step) && sd.step >= 1;
+    row.innerHTML = `<label>${sd.label}</label><input type="range" min="${sd.min}" max="${sd.max}" step="${sd.step}" value="${SCAN_CONFIG[sd.key]}" id="sl_${sd.key}"><span class="val" id="sv_${sd.key}">${SCAN_CONFIG[sd.key]}</span>`;
+    container.appendChild(row);
+    row.querySelector('input').oninput = function() {
+      const v = parseFloat(this.value);
+      SCAN_CONFIG[sd.key] = v;
+      document.getElementById('sv_'+sd.key).textContent = isInt ? v : v.toFixed(2);
+    };
+  });
+}
+
+// ===== COLOR MATH =====
+function rgb2lab(r, g, b) {
+  let r_=r/255, g_=g/255, b_=b/255;
+  r_ = r_>0.04045 ? Math.pow((r_+0.055)/1.055,2.4) : r_/12.92;
+  g_ = g_>0.04045 ? Math.pow((g_+0.055)/1.055,2.4) : g_/12.92;
+  b_ = b_>0.04045 ? Math.pow((b_+0.055)/1.055,2.4) : b_/12.92;
+  let x=(r_*0.4124+g_*0.3576+b_*0.1805)/0.95047;
+  let y=(r_*0.2126+g_*0.7152+b_*0.0722)/1.00000;
+  let z=(r_*0.0193+g_*0.1192+b_*0.9505)/1.08883;
+  x=x>0.008856?Math.pow(x,1/3):(7.787*x)+16/116;
+  y=y>0.008856?Math.pow(y,1/3):(7.787*y)+16/116;
+  z=z>0.008856?Math.pow(z,1/3):(7.787*z)+16/116;
+  return [(116*y)-16, 500*(x-y), 200*(y-z)];
+}
+
+function toHSV(r, g, b) {
+  const rf=r/255, gf=g/255, bf=b/255;
+  const mx=Math.max(rf,gf,bf), mn=Math.min(rf,gf,bf), d=mx-mn;
+  const v=mx, s=mx>0?d/mx:0;
+  let h=0;
+  if(d>0.001){
+    if(mx===rf) h=60*(((gf-bf)/d)%6);
+    else if(mx===gf) h=60*((bf-rf)/d+2);
+    else h=60*((rf-gf)/d+4);
+    if(h<0) h+=360;
+  }
+  return [h,s,v];
+}
+
+function smartDist(r,g,b, ar,ag,ab, targetColor) {
+  const [l1,a1,b1]=rgb2lab(r,g,b);
+  const [l2,a2,b2]=rgb2lab(ar,ag,ab);
+  const dl=(l1-l2)*SCAN_CONFIG.lWeight, da=a1-a2, db=b1-b2;
+  let deltaE=Math.sqrt(dl*dl+da*da+db*db);
+  const [h,s,v]=toHSV(r,g,b);
+
+  if(targetColor==='W'){
+    if(s>SCAN_CONFIG.whiteSatThreshold) deltaE+=s*SCAN_CONFIG.whiteSatPenalty;
+    if(b1>SCAN_CONFIG.whiteBStarThreshold) deltaE+=b1*SCAN_CONFIG.whiteBStarPenalty;
+    return deltaE;
+  }
+  if(s<SCAN_CONFIG.lowSatThreshold && targetColor!=='W'){
+    return deltaE+SCAN_CONFIG.lowSatPenalty;
+  }
+  return deltaE;
+}
+
+// ===== PIPELINE =====
+function runPipeline() {
+  logLines = [];
+  log('🚀 開始掃描管線...','ok');
+
+  // Stage 1: Sample
+  log('── Stage 1: 像素取樣 ──');
+  rawData = {};
+  const photoThumbs = document.getElementById('photoThumbs');
+  photoThumbs.innerHTML = '';
+  document.getElementById('photoOverlays').style.display = 'block';
+
+  SCAN_SEQ.forEach(sq => {
+    const img = images[sq.f];
+    const cvs = document.createElement('canvas');
+    const ctx = cvs.getContext('2d');
+    cvs.width = img.naturalWidth; cvs.height = img.naturalHeight;
+    ctx.drawImage(img, 0, 0);
+
+    const vw=cvs.width, vh=cvs.height;
+    const gs=Math.min(vw,vh)*0.82;
+    const cs=gs/3;
+    const sx=(vw-gs)/2, sy=(vh-gs)/2;
+    const half=Math.round(cs*SCAN_CONFIG.sampleRadius);
+    const sampleSize=half*2+1;
+
+    const faceRGB = [];
+    for(let r=0;r<3;r++){
+      for(let c=0;c<3;c++){
+        const px=Math.round(sx+(c+0.5)*cs);
+        const py=Math.round(sy+(r+0.5)*cs);
+        const d=ctx.getImageData(Math.max(0,px-half),Math.max(0,py-half),sampleSize,sampleSize);
+        let pixels=[];
+        for(let i=0;i<d.data.length;i+=4) pixels.push([d.data[i],d.data[i+1],d.data[i+2]]);
+        if(pixels.length>8){
+          pixels.sort((a,b)=>(a[0]+a[1]+a[2])-(b[0]+b[1]+b[2]));
+          const trim=Math.floor(pixels.length*SCAN_CONFIG.trimRatio);
+          pixels=pixels.slice(trim,pixels.length-trim);
+        }
+        let rr=0,gg=0,bb=0;
+        pixels.forEach(p=>{rr+=p[0];gg+=p[1];bb+=p[2]});
+        const n=pixels.length;
+        faceRGB.push([Math.round(rr/n),Math.round(gg/n),Math.round(bb/n)]);
+      }
+    }
+    rawData[sq.f] = faceRGB;
+    log(`  ${sq.f}面 取樣完成 (center RGB: ${faceRGB[4].join(',')})`);
+
+    // Draw overlay thumb
+    const thumbCvs = document.createElement('canvas');
+    const tctx = thumbCvs.getContext('2d');
+    const scale = 200 / Math.max(vw, vh);
+    thumbCvs.width = Math.round(vw * scale);
+    thumbCvs.height = Math.round(vh * scale);
+    tctx.drawImage(img, 0, 0, thumbCvs.width, thumbCvs.height);
+    // Draw grid
+    tctx.strokeStyle = 'rgba(80,200,255,0.7)';
+    tctx.lineWidth = 1;
+    for(let r=0;r<3;r++){
+      for(let c=0;c<3;c++){
+        const cx=Math.round((sx+(c+0.5)*cs)*scale);
+        const cy=Math.round((sy+(r+0.5)*cs)*scale);
+        const hr=Math.round(half*scale);
+        tctx.strokeRect(cx-hr, cy-hr, hr*2, hr*2);
+        // Dot with sampled color
+        tctx.fillStyle=`rgb(${faceRGB[r*3+c].join(',')})`;
+        tctx.beginPath();tctx.arc(cx,cy,3,0,Math.PI*2);tctx.fill();
+      }
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className='photo-preview';
+    wrapper.innerHTML=`<div style="font-size:.7em;color:var(--text2);margin-bottom:2px">${sq.f} - ${sq.name}</div>`;
+    wrapper.appendChild(thumbCvs);
+    photoThumbs.appendChild(wrapper);
+  });
+
+  // Stage 2: Dynamic anchors
+  log('── Stage 2: 動態錨點 ──');
+  anchors = buildDynamicAnchors(rawData);
+  const anchorsRow = document.getElementById('anchorsRow');
+  anchorsRow.innerHTML = '';
+  Object.entries(anchors).forEach(([c, rgb]) => {
+    const chip = document.createElement('div');
+    chip.className='anchor-chip';
+    chip.innerHTML=`<div class="anchor-swatch" style="background:rgb(${rgb.join(',')})"></div>${CN[c]} (${rgb.join(',')})`;
+    anchorsRow.appendChild(chip);
+  });
+
+  // Stage 3-4: Build stickers & distances & greedy assign
+  log('── Stage 3: smartDist 距離計算 ──');
+  log('── Stage 4: 貪婪分配 ──');
+  allStickers = [];
+  ['F','R','B','L','U','D'].forEach(face => {
+    for(let i=0;i<9;i++){
+      allStickers.push({face, pos:i, rgb:rawData[face][i], color:null, dists:{}, bestDist:0, secondColor:null, secondDist:0, ambiguity:1});
+    }
+  });
+  // Fix centers
+  allStickers.filter(s=>s.pos===4).forEach(s=>{ s.color=CC[s.face]; });
+  const cnt={W:1,R:1,B:1,O:1,G:1,Y:1};
+  const nonC=allStickers.filter(s=>s.pos!==4);
+  // Compute distances
+  nonC.forEach(s=>{
+    s.dists={};
+    const [r,g,b]=s.rgb;
+    Object.entries(anchors).forEach(([c,[ar,ag,ab]])=>{
+      s.dists[c]=smartDist(r,g,b,ar,ag,ab,c);
+    });
+  });
+  // Greedy
+  const cands=[];
+  nonC.forEach(s=>{
+    Object.entries(s.dists).forEach(([c,d])=>{cands.push({s,c,d})});
+  });
+  cands.sort((a,b)=>a.d-b.d);
+  cands.forEach(({s,c})=>{
+    if(s.color||cnt[c]>=9) return;
+    s.color=c; cnt[c]++;
+  });
+  nonC.filter(s=>!s.color).forEach(s=>{
+    const a=Object.entries(cnt).find(([c,n])=>n<9);
+    if(a){s.color=a[0];cnt[a[0]]++;}
+  });
+  log(`  分配完成: ${JSON.stringify(cnt)}`);
+
+  // Stage 5: Confidence
+  log('── Stage 5: 信心度計算 ──');
+  nonC.forEach(s=>{
+    const sorted=Object.entries(s.dists).sort((a,b)=>a[1]-b[1]);
+    s.bestDist=sorted[0][1];
+    s.secondColor=sorted[1][0];
+    s.secondDist=sorted[1][1];
+    s.ambiguity=s.secondDist>0?(s.secondDist-s.bestDist)/s.secondDist:1;
+  });
+  const lowConf=nonC.filter(s=>s.ambiguity<0.35);
+  log(`  低信心格子: ${lowConf.length} 個`);
+  lowConf.sort((a,b)=>a.ambiguity-b.ambiguity);
+  lowConf.slice(0,5).forEach(s=>{
+    log(`  ⚠️ ${s.face}[${s.pos}] amb=${s.ambiguity.toFixed(3)} ${s.color}↔${s.secondColor}`,'warn');
+  });
+
+  // Stage 6: Edge constraints
+  log('── Stage 6: 邊塊約束修正 ──');
+  faceColors={};
+  ['F','R','B','L','U','D'].forEach(f=>{
+    faceColors[f]=allStickers.filter(s=>s.face===f).sort((a,b)=>a.pos-b.pos).map(s=>s.color);
+  });
+  const edgeConstraints = [
+    ['F',1,'R',3],['F',3,'L',5],['F',5,'R',3],['R',5,'B',3],['B',5,'L',3],['L',5,'F',3],
+    ['F',2,'R',0],['R',2,'B',0],['B',2,'L',0],['L',2,'F',0],
+    ['F',8,'R',6],['R',8,'B',6],['B',8,'L',6],['L',8,'F',6],
+    ['U',6,'F',0],['U',7,'F',1],['U',8,'F',2],
+    ['U',8,'R',0],['U',5,'R',1],['U',2,'R',2],
+    ['U',2,'B',0],['U',1,'B',1],['U',0,'B',2],
+    ['U',0,'L',0],['U',3,'L',1],['U',6,'L',2],
+    ['D',0,'F',6],['D',1,'F',7],['D',2,'F',8],
+    ['D',2,'R',6],['D',5,'R',7],['D',8,'R',8],
+    ['D',8,'B',6],['D',7,'B',7],['D',6,'B',8],
+    ['D',0,'L',8],['D',3,'L',7],['D',6,'L',6],
+  ];
+  let fixes6=0;
+  for(let pass=0;pass<3;pass++){
+    edgeConstraints.forEach(([f1,p1,f2,p2])=>{
+      const c1=faceColors[f1][p1], c2=faceColors[f2][p2];
+      if(isInvalidEdge(c1,c2)){
+        const s1=nonC.find(s=>s.face===f1&&s.pos===p1);
+        const s2=nonC.find(s=>s.face===f2&&s.pos===p2);
+        if(!s1||!s2) return;
+        if(s1.ambiguity<s2.ambiguity){
+          s1.color=s1.secondColor; faceColors[f1][p1]=s1.secondColor;
+        } else {
+          s2.color=s2.secondColor; faceColors[f2][p2]=s2.secondColor;
+        }
+        fixes6++;
+      }
+    });
+  }
+  log(`  修正了 ${fixes6} 處`);
+
+  // Stage 7: Cubie uniqueness
+  log('── Stage 7: Cubie唯一性 ──');
+  const edgeCubies=[
+    ['U',7,'F',1],['U',5,'R',1],['U',1,'B',1],['U',3,'L',1],
+    ['D',1,'F',7],['D',5,'R',7],['D',7,'B',7],['D',3,'L',7],
+    ['F',5,'R',3],['F',3,'L',5],['B',3,'R',5],['B',5,'L',3],
+  ];
+  const cornerCubies=[
+    ['U',8,'F',2,'R',0],['U',6,'F',0,'L',2],['U',2,'B',0,'R',2],['U',0,'B',2,'L',0],
+    ['D',2,'F',8,'R',6],['D',0,'F',6,'L',8],['D',8,'B',6,'R',8],['D',6,'B',8,'L',6],
+  ];
+  // Simple uniqueness pass
+  let fixes7=0;
+  function getEdgeKey(i){
+    const [f1,p1,f2,p2]=edgeCubies[i];
+    return [faceColors[f1][p1],faceColors[f2][p2]].sort().join('-');
+  }
+  function getCornerKey(i){
+    const [f1,p1,f2,p2,f3,p3]=cornerCubies[i];
+    return [faceColors[f1][p1],faceColors[f2][p2],faceColors[f3][p3]].sort().join('-');
+  }
+  for(let i=0;i<edgeCubies.length;i++){
+    for(let j=i+1;j<edgeCubies.length;j++){
+      if(getEdgeKey(i)===getEdgeKey(j)){
+        // Find lowest ambiguity sticker among all 4
+        const stickerIndices=[];
+        [edgeCubies[i],edgeCubies[j]].forEach(ec=>{
+          for(let k=0;k<ec.length;k+=2){
+            const s=nonC.find(s=>s.face===ec[k]&&s.pos===ec[k+1]);
+            if(s) stickerIndices.push(s);
+          }
+        });
+        stickerIndices.sort((a,b)=>a.ambiguity-b.ambiguity);
+        if(stickerIndices.length>0){
+          const worst=stickerIndices[0];
+          worst.color=worst.secondColor;
+          faceColors[worst.face][worst.pos]=worst.secondColor;
+          fixes7++;
+        }
+      }
+    }
+  }
+  log(`  邊塊修正: ${fixes7}`);
+
+  // Stage 8: Count check
+  log('── Stage 8: 數量檢查 ──');
+  const fcnt={W:0,R:0,B:0,O:0,G:0,Y:0};
+  ['F','R','B','L','U','D'].forEach(f=>faceColors[f].forEach(c=>fcnt[c]=(fcnt[c]||0)+1));
+  const countOk=Object.values(fcnt).every(v=>v===9);
+  if(countOk) log('  ✅ 每色各9個','ok');
+  else log(`  ❌ 數量不對: ${JSON.stringify(fcnt)}`,'err');
+
+  // Stage 9: Flag human review candidates
+  log('── Stage 9: 人工判定候選 ──');
+  const humanCheck=[];
+  nonC.forEach(s=>{
+    if(s.ambiguity>0.35) return;
+    const pair=confusedPairs.find(p=>(s.color===p[0]&&s.secondColor===p[1])||(s.color===p[1]&&s.secondColor===p[0]));
+    if(pair) humanCheck.push(s);
+  });
+  log(`  需人工確認: ${humanCheck.length} 格`);
+  humanCheck.forEach(s=>log(`  🔍 ${s.face}[${s.pos}] ${CN[s.color]}↔${CN[s.secondColor]} amb=${s.ambiguity.toFixed(3)}`,'warn'));
+
+  // Render
+  renderCubeNet();
+  renderStats(fcnt, countOk);
+  renderLog();
+  document.getElementById('resultSection').style.display='block';
+  document.getElementById('statusBadge').textContent = countOk ? '✅ 掃描完成' : '⚠️ 需修正';
+}
+
+function buildDynamicAnchors(rawData){
+  const a={};
+  const FACES=['F','R','B','L','U','D'];
+  const COLS=['R','B','O','G','W','Y'];
+  for(let i=0;i<6;i++){
+    const face=FACES[i], color=COLS[i];
+    const centerRGB=rawData[face][4];
+    if(color==='W'){
+      const [h,s,v]=toHSV(centerRGB[0],centerRGB[1],centerRGB[2]);
+      if(s>SCAN_CONFIG.logoSatThreshold){
+        log(`  ⚠️ 白色中心被Logo污染 (S=${s.toFixed(3)})`,'warn');
+        // Try corners first
+        const corners=[rawData[face][0],rawData[face][2],rawData[face][6],rawData[face][8]];
+        const cornerAvg=[
+          Math.round(corners.reduce((s,p)=>s+p[0],0)/4),
+          Math.round(corners.reduce((s,p)=>s+p[1],0)/4),
+          Math.round(corners.reduce((s,p)=>s+p[2],0)/4)
+        ];
+        const [ch,cs2,cv]=toHSV(cornerAvg[0],cornerAvg[1],cornerAvg[2]);
+        const [cl,ca,cb]=rgb2lab(cornerAvg[0],cornerAvg[1],cornerAvg[2]);
+        if(cs2<0.15 && cb<15){
+          log(`  → 四角平均有效: RGB(${cornerAvg.join(',')}) S=${cs2.toFixed(3)} b*=${cb.toFixed(1)}`);
+          a['W']=cornerAvg;
+        } else {
+          // Corners are also non-white (scrambled cube!) → scan all 54 cells for whitest
+          log(`  → 四角也非白色 (S=${cs2.toFixed(3)} b*=${cb.toFixed(1)})，掃描全部色塊找最白`,'warn');
+          let bestWhite=null, bestScore=Infinity;
+          FACES.forEach(f=>{
+            rawData[f].forEach((rgb,idx)=>{
+              if(idx===4) return; // skip centers
+              const [hh,ss,vv]=toHSV(rgb[0],rgb[1],rgb[2]);
+              const [ll,aa,bb]=rgb2lab(rgb[0],rgb[1],rgb[2]);
+              // White = high L, low S, low |b*|
+              const score = ss*100 + Math.abs(bb) + (100-ll)*0.5;
+              if(score<bestScore && ss<0.1 && Math.abs(bb)<10 && ll>70){
+                bestScore=score; bestWhite=rgb;
+              }
+            });
+          });
+          if(bestWhite){
+            a['W']=bestWhite;
+            log(`  → 找到最白色塊: RGB(${bestWhite.join(',')})`, 'ok');
+          } else {
+            // Ultimate fallback: use a generic high-L low-sat reference
+            a['W']=[220,220,220];
+            log(`  → 未找到白色塊，使用預設錨點 (220,220,220)`,'warn');
+          }
+        }
+        continue;
+      }
+    }
+    a[color]=centerRGB;
+  }
+  return a;
+}
+
+function isInvalidEdge(c1,c2){
+  if(invalidPairs.some(([a,b])=>(c1===a&&c2===b)||(c1===b&&c2===a))) return true;
+  if(c1===c2) return true;
+  return false;
+}
+
+// ===== RENDER =====
+function renderCubeNet(){
+  const container=document.getElementById('cubeNetContainer');
+  container.innerHTML='';
+  // Cube net layout: cross pattern
+  //        [U]
+  //   [L] [F] [R] [B]
+  //        [D]
+  const grid=document.createElement('div');
+  grid.style.cssText='display:grid;grid-template-columns:repeat(4,auto);gap:8px;justify-content:center;align-items:start';
+  const order=[
+    [null,'U',null,null],
+    ['L','F','R','B'],
+    [null,'D',null,null]
+  ];
+  order.forEach(row=>{
+    row.forEach(face=>{
+      if(!face){
+        const empty=document.createElement('div');
+        empty.style.width='114px';
+        grid.appendChild(empty);
+        return;
+      }
+      const block=document.createElement('div');
+      block.className='face-block';
+      block.innerHTML=`<div style="grid-column:1/4;font-size:.7em;color:var(--text2);text-align:center;margin-bottom:2px">${face}(${CN[CC[face]]})</div>`;
+      for(let i=0;i<9;i++){
+        const cell=document.createElement('div');
+        const c=faceColors[face][i];
+        cell.className=`cell color-${c}${i===4?' center':''}`;
+        cell.textContent=`${i}`;
+        cell.dataset.face=face;
+        cell.dataset.pos=i;
+        // Mark low confidence
+        const sticker=allStickers.find(s=>s.face===face&&s.pos===i);
+        if(sticker&&sticker.ambiguity<0.35&&i!==4) cell.classList.add('low-conf');
+        cell.onclick=()=>onCellClick(face,i);
+        block.appendChild(cell);
+      }
+      grid.appendChild(block);
+    });
+  });
+  container.appendChild(grid);
+}
+
+function renderStats(fcnt, countOk){
+  const bar=document.getElementById('statsBar');
+  bar.innerHTML='';
+  COLORS.forEach(c=>{
+    const stat=document.createElement('span');
+    stat.className=`stat ${fcnt[c]===9?'ok':'bad'}`;
+    stat.textContent=`${CN[c]}:${fcnt[c]}`;
+    bar.appendChild(stat);
+  });
+  const total=document.createElement('span');
+  total.className=`stat ${countOk?'ok':'bad'}`;
+  total.textContent=countOk?'✅ 合法':'❌ 不合法';
+  bar.appendChild(total);
+}
+
+function renderLog(){
+  const box=document.getElementById('logBox');
+  box.innerHTML=logLines.map(l=>`<div class="${l.cls||''}">${l.text}</div>`).join('');
+  box.scrollTop=box.scrollHeight;
+}
+
+function log(text,cls){
+  logLines.push({text,cls:cls||''});
+}
+
+// ===== CELL INTERACTION =====
+function onCellClick(face,pos){
+  // Show diagnostics
+  const sticker=allStickers.find(s=>s.face===face&&s.pos===pos);
+  if(!sticker) return;
+  selectedCell={face,pos};
+
+  if(pos===4){
+    // Center - show info only
+    showDiagForSticker(sticker);
+    return;
+  }
+
+  // Show color picker
+  showColorPicker(sticker);
+  showDiagForSticker(sticker);
+}
+
+function showDiagForSticker(s){
+  const panel=document.getElementById('diagPanel');
+  const content=document.getElementById('diagContent');
+  panel.style.display='block';
+  const [l,a,b]=rgb2lab(s.rgb[0],s.rgb[1],s.rgb[2]);
+  const [h,sv,v]=toHSV(s.rgb[0],s.rgb[1],s.rgb[2]);
+  const sorted=Object.entries(s.dists).sort((a,b)=>a[1]-b[1]);
+
+  content.innerHTML=`
+    <div class="diag-cell">
+      <strong>${s.face}[${s.pos}] → ${CN[s.color]||'?'}</strong> &nbsp;
+      <span style="display:inline-block;width:14px;height:14px;border-radius:3px;vertical-align:middle;background:rgb(${s.rgb.join(',')});border:1px solid rgba(255,255,255,.3)"></span>
+      <br>
+      RGB: (${s.rgb.join(', ')})<br>
+      LAB: L=${l.toFixed(1)} a*=${a.toFixed(1)} b*=${b.toFixed(1)}<br>
+      HSV: H=${h.toFixed(0)}° S=${sv.toFixed(3)} V=${v.toFixed(3)}<br>
+      ${s.pos!==4?`ambiguity: ${s.ambiguity.toFixed(3)} ${s.ambiguity<0.35?'⚠️ 低信心':'✅'}`:'(中心格 - 固定)'}
+      <br><br>
+      <strong>距離表：</strong><br>
+      <div class="row">
+        ${sorted.map(([c,d],i)=>`<span class="dist-entry${i===0?' best':i===1?' second':''}">${CN[c]}: ${d.toFixed(1)}${i===0?' ★':i===1?' ←2nd':''}</span>`).join(' ')}
+      </div>
+      ${s.pos!==4&&s.dists.W!==undefined?`<br><small>b*=${b.toFixed(1)} ${b>SCAN_CONFIG.whiteBStarThreshold?'> '+SCAN_CONFIG.whiteBStarThreshold+' → b*守門觸發':'< '+SCAN_CONFIG.whiteBStarThreshold+' → 未觸發'}</small>`:''}
+    </div>`;
+}
+
+function showColorPicker(sticker){
+  const picker=document.getElementById('colorPicker');
+  const overlay=document.getElementById('overlay');
+  const cpColors=document.getElementById('cpColors');
+  document.getElementById('cpTitle').textContent=`${sticker.face}[${sticker.pos}] 手動選色`;
+  cpColors.innerHTML='';
+  COLORS.forEach(c=>{
+    const d=document.createElement('div');
+    d.className='cpick color-'+c;
+    d.title=CN[c];
+    d.onclick=()=>{
+      // Update color
+      sticker.color=c;
+      faceColors[sticker.face][sticker.pos]=c;
+      closeColorPicker();
+      renderCubeNet();
+      // Recount
+      const fcnt={W:0,R:0,B:0,O:0,G:0,Y:0};
+      ['F','R','B','L','U','D'].forEach(f=>faceColors[f].forEach(c=>fcnt[c]=(fcnt[c]||0)+1));
+      const ok=Object.values(fcnt).every(v=>v===9);
+      renderStats(fcnt,ok);
+    };
+    cpColors.appendChild(d);
+  });
+  picker.style.display='block';
+  overlay.style.display='block';
+}
+
+function closeColorPicker(){
+  document.getElementById('colorPicker').style.display='none';
+  document.getElementById('overlay').style.display='none';
+}
+
+function toggleDiag(){
+  const p=document.getElementById('diagPanel');
+  if(!allStickers.length) return;
+  diagShown=!diagShown;
+  if(diagShown){
+    p.style.display='block';
+    // Show all stickers sorted by ambiguity
+    const content=document.getElementById('diagContent');
+    const sorted=[...allStickers.filter(s=>s.pos!==4)].sort((a,b)=>a.ambiguity-b.ambiguity);
+    content.innerHTML=sorted.slice(0,15).map(s=>{
+      const [l,a,b]=rgb2lab(s.rgb[0],s.rgb[1],s.rgb[2]);
+      const [h,sv,v]=toHSV(s.rgb[0],s.rgb[1],s.rgb[2]);
+      const ds=Object.entries(s.dists).sort((a,b)=>a[1]-b[1]);
+      return `<div class="diag-cell" onclick="showDiagForSticker(allStickers.find(x=>x.face==='${s.face}'&&x.pos===${s.pos}))">
+        <strong>${s.face}[${s.pos}]→${CN[s.color]}</strong> amb=${s.ambiguity.toFixed(3)} | RGB(${s.rgb.join(',')}) | b*=${b.toFixed(1)} S=${sv.toFixed(3)}
+        <div class="row">${ds.map(([c,d],i)=>`<span class="dist-entry${i===0?' best':i===1?' second':''}">${CN[c]}:${d.toFixed(1)}</span>`).join(' ')}</div>
+      </div>`;
+    }).join('');
+  } else {
+    p.style.display='none';
+  }
+}
+
+function exportResult(){
+  if(!Object.keys(faceColors).length) return;
+  let fl='';
+  ['U','R','F','D','L','B'].forEach(f=>{
+    faceColors[f].forEach(c=>fl+=(C2F[c]||'?'));
+  });
+  const obj={faceColors,faceletString:fl,anchors,config:{...SCAN_CONFIG}};
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='cube-scan-result.json';a.click();
+}
+
+function exportConfig(){
+  const text=`export const SCAN_CONFIG = ${JSON.stringify(SCAN_CONFIG,null,2)};`;
+  navigator.clipboard.writeText(text).then(()=>alert('已複製 SCAN_CONFIG 到剪貼簿'));
+}
+
+init();
+</script>
+</body>
+</html>
