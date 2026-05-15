@@ -103,6 +103,23 @@ h3{font-size:.95em;color:var(--text2);margin:8px 0 4px}
 .photo-thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
 .solve-move{display:inline-block;padding:2px 6px;margin:2px;border-radius:3px;background:var(--surface);border:1px solid var(--border);font-family:var(--font-mono);font-size:.85em}
 .solve-move.prime{color:var(--accent2)}.solve-move.double{color:var(--accent)}
+
+/* Camera mode */
+#camOverlay{display:none;position:fixed;top:0;left:0;width:100%;height:100%;z-index:200;background:#000;flex-direction:column}
+#camOverlay.show{display:flex}
+#camVideo{width:100%;flex:1;object-fit:contain;background:#000}
+#camCanvas{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:contain;pointer-events:none}
+#camUI{position:absolute;bottom:0;left:0;width:100%;padding:12px;display:flex;flex-direction:column;align-items:center;gap:8px;background:linear-gradient(transparent,rgba(0,0,0,.8))}
+#camTitle{color:#FFD700;font-size:16px;font-weight:700;text-shadow:0 1px 4px rgba(0,0,0,.8)}
+#camSub{color:rgba(255,255,255,.6);font-size:12px}
+#camGrid{display:grid;grid-template-columns:repeat(3,28px);gap:2px}
+#camGrid .cg{width:28px;height:28px;border-radius:4px;border:1px solid rgba(255,255,255,.2)}
+#camCapBtn{padding:12px 40px;border-radius:30px;background:#FFD700;color:#000;font-size:16px;font-weight:700;border:none;cursor:pointer}
+#camCapBtn:active{transform:scale(.95)}
+#camDots{display:flex;gap:6px}
+#camDots .cd{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.2)}
+#camDots .cd.done{background:var(--accent)}
+#camDots .cd.now{background:#FFD700;box-shadow:0 0 6px #FFD700}
 </style>
 </head>
 <body>
@@ -119,6 +136,7 @@ h3{font-size:.95em;color:var(--text2);margin:8px 0 4px}
 
 <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
   <button class="btn primary" onclick="runPipeline()" id="scanBtn" disabled>▶ 執行掃描</button>
+  <button class="btn" onclick="camStart()" style="background:var(--accent2);color:#000;border-color:var(--accent2)">📸 手機拍照</button>
   <button class="btn" onclick="runSolve()" id="solveBtn" disabled style="background:var(--green);color:#000;border-color:var(--green);font-weight:600">🧮 驗證+求解</button>
   <button class="btn" onclick="exportResult()">💾 匯出 JSON</button>
   <button class="btn" onclick="toggleDiag()">📊 診斷面板</button>
@@ -3092,7 +3110,147 @@ function doSolve(faceletStr, resultDiv) {
   }, 100);
 }
 
+
+// ===== CAMERA MODE =====
+let camVid, camOv, camCtx, camIdx=0;
+const CAM_SEQ=[
+  {f:'F',name:'前(紅)',guide:'白色朝上，紅色面對鏡頭'},
+  {f:'R',name:'右(藍)',guide:'順時針轉90°，藍色面對鏡頭'},
+  {f:'B',name:'後(橘)',guide:'再轉90°，橘色面對鏡頭'},
+  {f:'L',name:'左(綠)',guide:'再轉90°，綠色面對鏡頭'},
+  {f:'U',name:'上(白)',guide:'往前傾，白色面對鏡頭'},
+  {f:'D',name:'下(黃)',guide:'往後傾180°，黃色面對鏡頭'},
+];
+
+async function camStart(){
+  camIdx=0;
+  const ov=document.getElementById('camOverlay');
+  ov.classList.add('show');
+  camVid=document.getElementById('camVideo');
+  const cvs=document.getElementById('camCanvas');
+  try{
+    const s=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280},height:{ideal:720}}});
+    camVid.srcObject=s;await camVid.play();
+    // Torch
+    try{var tr=s.getVideoTracks()[0];if(tr){var caps=tr.getCapabilities();if(caps&&caps.torch)await tr.applyConstraints({advanced:[{torch:true}]});}}catch(e){}
+    // Size canvas to match video
+    camVid.onloadedmetadata=function(){
+      cvs.width=camVid.videoWidth;cvs.height=camVid.videoHeight;
+      camCtx=cvs.getContext('2d');
+      camDrawGrid();
+    };
+    if(camVid.videoWidth){cvs.width=camVid.videoWidth;cvs.height=camVid.videoHeight;camCtx=cvs.getContext('2d');camDrawGrid();}
+    camUpdateUI();
+  }catch(e){alert('相機錯誤: '+e.message);camClose();}
+}
+
+function camClose(){
+  if(camVid&&camVid.srcObject){camVid.srcObject.getTracks().forEach(t=>t.stop());camVid.srcObject=null;}
+  document.getElementById('camOverlay').classList.remove('show');
+}
+
+function camDrawGrid(){
+  if(!camCtx)return;
+  const vw=camVid.videoWidth,vh=camVid.videoHeight;
+  camCtx.clearRect(0,0,vw,vh);
+  const gs=Math.min(vw,vh)*0.82,cs=gs/3,sx=(vw-gs)/2,sy=(vh-gs)/2;
+  // Dark overlay outside grid
+  camCtx.fillStyle='rgba(0,0,0,.35)';
+  camCtx.fillRect(0,0,vw,sy);camCtx.fillRect(0,sy+gs,vw,vh-sy-gs);
+  camCtx.fillRect(0,sy,sx,gs);camCtx.fillRect(sx+gs,sy,vw-sx-gs,gs);
+  // Grid lines
+  camCtx.strokeStyle='rgba(255,215,0,.4)';camCtx.lineWidth=2;
+  for(let i=0;i<=3;i++){
+    camCtx.beginPath();camCtx.moveTo(sx+i*cs,sy);camCtx.lineTo(sx+i*cs,sy+gs);camCtx.stroke();
+    camCtx.beginPath();camCtx.moveTo(sx,sy+i*cs);camCtx.lineTo(sx+gs,sy+i*cs);camCtx.stroke();
+  }
+  // Corner brackets
+  camCtx.strokeStyle='#FFD700';camCtx.lineWidth=4;
+  const m=20;
+  [[sx,sy],[sx+gs,sy],[sx,sy+gs],[sx+gs,sy+gs]].forEach(([x,y])=>{
+    const dx=x===sx?1:-1,dy=y===sy?1:-1;
+    camCtx.beginPath();camCtx.moveTo(x+m*dx,y);camCtx.lineTo(x,y);camCtx.lineTo(x,y+m*dy);camCtx.stroke();
+  });
+  // Sample dots
+  camCtx.fillStyle='rgba(255,255,255,.3)';
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    const px=sx+(c+.5)*cs,py=sy+(r+.5)*cs;
+    camCtx.beginPath();camCtx.arc(px,py,4,0,Math.PI*2);camCtx.fill();
+  }
+}
+
+function camUpdateUI(){
+  const info=CAM_SEQ[camIdx];
+  document.getElementById('camTitle').textContent=info.name;
+  document.getElementById('camSub').textContent=info.guide;
+  document.getElementById('camDots').innerHTML=CAM_SEQ.map((_,i)=>'<div class="cd'+(i<camIdx?' done':'')+(i===camIdx?' now':'')+'"></div>').join('');
+  document.getElementById('camGrid').innerHTML='';
+}
+
+function camCapture(){
+  if(!camVid||!camVid.videoWidth)return;
+  const vw=camVid.videoWidth,vh=camVid.videoHeight;
+  const tc=document.createElement('canvas');tc.width=vw;tc.height=vh;
+  const tctx=tc.getContext('2d');tctx.drawImage(camVid,0,0,vw,vh);
+  const gs=Math.min(vw,vh)*0.82,cs=gs/3,sx=(vw-gs)/2,sy=(vh-gs)/2;
+  const half=Math.round(cs*SCAN_CONFIG.sampleRadius);
+  let rgbs=[];
+  for(let r=0;r<3;r++)for(let c=0;c<3;c++){
+    const px=Math.round(sx+(c+.5)*cs),py=Math.round(sy+(r+.5)*cs);
+    const ss=half*2+1;
+    const d=tctx.getImageData(Math.max(0,px-half),Math.max(0,py-half),ss,ss);
+    let pixels=[];for(let i=0;i<d.data.length;i+=4)pixels.push([d.data[i],d.data[i+1],d.data[i+2]]);
+    if(pixels.length>8){pixels.sort((a,b)=>(a[0]+a[1]+a[2])-(b[0]+b[1]+b[2]));const trim=Math.floor(pixels.length*SCAN_CONFIG.trimRatio);pixels=pixels.slice(trim,pixels.length-trim);}
+    let rr=0,gg=0,bb=0;pixels.forEach(p=>{rr+=p[0];gg+=p[1];bb+=p[2]});
+    const n=pixels.length;rgbs.push([Math.round(rr/n),Math.round(gg/n),Math.round(bb/n)]);
+  }
+  // Store as rawData for this face
+  rawData[CAM_SEQ[camIdx].f]=rgbs;
+  if(navigator.vibrate)navigator.vibrate(80);
+  // Show preview grid
+  const grid=document.getElementById('camGrid');
+  grid.innerHTML=rgbs.map(([r,g,b],i)=>'<div class="cg" style="background:rgb('+r+','+g+','+b+')">'+(i===4?'⭐':'')+'</div>').join('');
+  // Also update the upload cell
+  const cell=document.getElementById('uc_'+CAM_SEQ[camIdx].f);
+  if(cell){cell.classList.add('loaded');
+    // Draw thumbnail
+    const thumbUrl=tc.toDataURL('image/jpeg',0.5);
+    let imgEl=cell.querySelector('img');
+    if(!imgEl){imgEl=document.createElement('img');cell.appendChild(imgEl);}
+    imgEl.src=thumbUrl;
+    // Store as Image for photo overlay
+    const img=new Image();img.src=thumbUrl;images[CAM_SEQ[camIdx].f]=img;
+  }
+  camIdx++;
+  if(camIdx>=CAM_SEQ.length){
+    document.getElementById('camTitle').textContent='✅ 6面拍攝完成！';
+    document.getElementById('camSub').textContent='';
+    document.getElementById('camCapBtn').textContent='🔍 分析顏色';
+    document.getElementById('camCapBtn').onclick=function(){camClose();checkReady();runPipeline();};
+    document.getElementById('camDots').innerHTML=CAM_SEQ.map(()=>'<div class="cd done"></div>').join('');
+  }else{
+    camUpdateUI();
+    camDrawGrid();
+  }
+}
+
 init();
 </script>
+
+<!-- Camera overlay -->
+<div id="camOverlay">
+  <div style="position:relative;flex:1;display:flex;align-items:center;justify-content:center">
+    <video id="camVideo" playsinline autoplay muted></video>
+    <canvas id="camCanvas"></canvas>
+  </div>
+  <div id="camUI">
+    <div id="camDots"></div>
+    <div id="camTitle">前(紅)</div>
+    <div id="camSub">白色朝上，紅色面對鏡頭</div>
+    <div id="camGrid" style="margin:4px 0"></div>
+    <button id="camCapBtn" onclick="camCapture()">📸 拍照</button>
+    <button onclick="camClose()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:12px;cursor:pointer;margin-top:4px">✕ 關閉相機</button>
+  </div>
+</div>
 </body>
 </html>
