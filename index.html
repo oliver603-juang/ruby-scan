@@ -2908,6 +2908,16 @@ function validateCubeParity(faceletStr) {
     const cube = Cube.fromString(faceletStr);
     const json = cube.toJSON();
     
+    // Check 0: Permutations must be VALID (no duplicates)
+    function isValidPerm(arr, n) {
+      const seen = new Set(arr);
+      if(seen.size !== n) return false;
+      for(const v of arr) if(v < 0 || v >= n) return false;
+      return true;
+    }
+    const epValid = isValidPerm(json.ep, 12);
+    const cpValid = isValidPerm(json.cp, 8);
+    
     // Check 1: Edge orientation sum mod 2 = 0
     const eoParity = json.eo.reduce((a,b) => a+b, 0) % 2;
     // Check 2: Corner orientation sum mod 3 = 0
@@ -2925,11 +2935,13 @@ function validateCubeParity(faceletStr) {
       }
       return parity%2;
     }
-    const epParity = getPermParity(json.ep);
-    const cpParity = getPermParity(json.cp);
+    const epParity = epValid ? getPermParity(json.ep) : -1;
+    const cpParity = cpValid ? getPermParity(json.cp) : -1;
+    
+    const valid = epValid && cpValid && eoParity===0 && coParity===0 && epParity===cpParity;
     
     return {
-      valid: (eoParity===0 && coParity===0 && epParity===cpParity),
+      valid, epValid, cpValid,
       eo: json.eo, co: json.co, ep: json.ep, cp: json.cp,
       eoSum: json.eo.reduce((a,b)=>a+b,0),
       coSum: json.co.reduce((a,b)=>a+b,0),
@@ -2943,6 +2955,8 @@ function validateCubeParity(faceletStr) {
 function tryAutoFix(faceletStr) {
   // Stage 11: Brute force swap search
   const arr = faceletStr.split('');
+  function isValidPerm(a,n){const s=new Set(a);if(s.size!==n)return false;for(const v of a)if(v<0||v>=n)return false;return true;}
+  function pp(a){const n=a.length,v=new Array(n).fill(false);let p=0;for(let i=0;i<n;i++){if(!v[i]){let j=i,l=0;while(!v[j]){v[j]=true;j=a[j];l++;}if(l>1)p+=(l-1);}}return p%2;}
   for(let i=0;i<54;i++){
     if(i%9===4) continue; // skip centers
     for(let j=i+1;j<54;j++){
@@ -2957,13 +2971,16 @@ function tryAutoFix(faceletStr) {
       if(!Object.values(cnt).every(v=>v===9)){
         [arr[i],arr[j]]=[arr[j],arr[i]]; continue;
       }
-      // Check parity
+      // Check full validity (parity + permutation)
       try {
         const c=Cube.fromString(test);
         const js=c.toJSON();
+        // Must be valid permutations (no duplicates)
+        if(!isValidPerm(js.ep,12)||!isValidPerm(js.cp,8)){
+          [arr[i],arr[j]]=[arr[j],arr[i]]; continue;
+        }
         const eo=js.eo.reduce((a,b)=>a+b,0)%2;
         const co=js.co.reduce((a,b)=>a+b,0)%3;
-        function pp(a){const n=a.length,v=new Array(n).fill(false);let p=0;for(let i=0;i<n;i++){if(!v[i]){let j=i,l=0;while(!v[j]){v[j]=true;j=a[j];l++;}if(l>1)p+=(l-1);}}return p%2;}
         if(eo===0 && co===0 && pp(js.ep)===pp(js.cp)){
           return {fixed:true, str:test, swap:[i,j]};
         }
@@ -3009,11 +3026,12 @@ function runSolve() {
   }
   
   parityDiv.innerHTML = `
+    EP 排列合法: ${parity.epValid?'✅':'❌ (有重複cubie!)'} | CP 排列合法: ${parity.cpValid?'✅':'❌ (有重複cubie!)'}<br>
     EO (邊朝向): [${parity.eo.join(',')}] sum%2 = ${parity.eoSum%2} ${parity.eoSum%2===0?'✅':'❌'}<br>
     CO (角朝向): [${parity.co.join(',')}] sum%3 = ${parity.coSum%3} ${parity.coSum%3===0?'✅':'❌'}<br>
-    EP (邊排列): parity = ${parity.epParity} | CP (角排列): parity = ${parity.cpParity} ${parity.epParity===parity.cpParity?'✅':'❌'}<br>
+    EP parity = ${parity.epParity} | CP parity = ${parity.cpParity} ${parity.epParity===parity.cpParity?'✅':'❌'}<br>
     <strong style="color:${parity.valid?'var(--green)':'var(--red)'}">
-      ${parity.valid ? '✅ Stage 10 驗證通過！物理上合法的魔方！' : '❌ 物理不可能的魔方狀態 (Parity Error)'}
+      ${parity.valid ? '✅ Stage 10 驗證通過！物理上合法的魔方！' : '❌ 物理不可能的魔方狀態'}
     </strong>
   `;
   
@@ -3038,13 +3056,20 @@ function runSolve() {
 }
 
 function doSolve(faceletStr, resultDiv) {
-  resultDiv.innerHTML = '<span style="color:var(--accent)">⏳ 初始化求解器...</span>';
+  resultDiv.innerHTML = '<span style="color:var(--accent)">⏳ 初始化求解器（約3秒）...</span>';
+  document.getElementById('solveSection').scrollIntoView({behavior:'smooth'});
   setTimeout(() => {
     try {
       ensureSolver();
       resultDiv.innerHTML = '<span style="color:var(--accent)">⏳ 求解中...</span>';
       setTimeout(() => {
         try {
+          // Double-check validity before solve to prevent infinite loop
+          const check = validateCubeParity(faceletStr);
+          if(!check.valid) {
+            resultDiv.innerHTML = `<span style="color:var(--red)">❌ 求解前再驗證失敗 (ep/cp 排列無效)，請手動修正色塊</span>`;
+            return;
+          }
           const cube = Cube.fromString(faceletStr);
           const solution = cube.solve();
           const moves = solution.trim().split(/\s+/).filter(m=>m);
@@ -3060,11 +3085,11 @@ function doSolve(faceletStr, resultDiv) {
         } catch(e) {
           resultDiv.innerHTML = `<span style="color:var(--red)">❌ 求解失敗: ${e.message}</span>`;
         }
-      }, 50);
+      }, 100);
     } catch(e) {
       resultDiv.innerHTML = `<span style="color:var(--red)">❌ 初始化失敗: ${e.message}</span>`;
     }
-  }, 50);
+  }, 100);
 }
 
 init();
